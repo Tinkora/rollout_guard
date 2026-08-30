@@ -54,3 +54,35 @@ fn bounds_duplicate_tracking_cardinality() {
         .iter()
         .any(|f| f.rule_id == "RG008_HASH_TRACKING_SATURATED"));
 }
+
+#[test]
+fn counts_an_instruction_at_most_once_per_record() {
+    let input = concat!(
+        "{\"instruction\":\"same\",\"prompt\":\"same\"}\n",
+        "{\"instruction\":\"same\"}\n"
+    );
+    let report = scan_reader(Cursor::new(input), "instructions.jsonl", &Limits::default()).unwrap();
+    assert_eq!(report.repeated_instruction_records, 1);
+}
+
+#[test]
+fn handles_maximum_line_limit_without_overflow() {
+    let limits = Limits {
+        max_line_bytes: usize::MAX,
+        ..Limits::default()
+    };
+    let report = scan_reader(Cursor::new("{\"ok\":true}\n"), "max.jsonl", &limits).unwrap();
+    assert_eq!(report.line_count, 1);
+    assert_eq!(report.oversized_lines, 0);
+}
+
+#[test]
+fn invalid_explicit_base64_is_reported_as_uninspected() {
+    let input = "{\"image\":\"data:image/png;base64,%%%\"}\n";
+    let report = scan_reader(Cursor::new(input), "invalid.jsonl", &Limits::default()).unwrap();
+    assert_eq!(report.uninspected_data_urls, 1);
+    assert!(report
+        .findings
+        .iter()
+        .any(|f| f.rule_id == "RG007_UNINSPECTED_DATA_URL"));
+}

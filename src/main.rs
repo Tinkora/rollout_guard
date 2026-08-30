@@ -62,21 +62,34 @@ fn run() -> Result<()> {
 }
 
 fn explicit_jsonl_paths(input: &Path) -> Result<Vec<PathBuf>> {
+    let input_metadata = fs::symlink_metadata(input)?;
+    if input_metadata.file_type().is_symlink() {
+        bail!("explicit symbolic-link inputs are not followed");
+    }
     if input.is_file() {
         return Ok(vec![input.to_owned()]);
     }
     if !input.is_dir() {
         bail!("input must be an explicit file or directory");
     }
-    let mut paths: Vec<_> = fs::read_dir(input)?
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.is_file()
-                && p.extension()
-                    .is_some_and(|e| e.eq_ignore_ascii_case("jsonl"))
-        })
-        .collect();
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(input)? {
+        let entry = entry.context("cannot read directory entry")?;
+        let file_type = entry
+            .file_type()
+            .context("cannot inspect directory entry")?;
+        let path = entry.path();
+        if file_type.is_symlink() {
+            bail!("directory contains a symbolic link: {}", safe_name(&path));
+        }
+        if file_type.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("jsonl"))
+        {
+            paths.push(path);
+        }
+    }
     paths.sort();
     if paths.is_empty() {
         bail!("directory contains no immediate .jsonl files");
@@ -88,7 +101,15 @@ fn safe_name(path: &Path) -> String {
     path.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("input")
-        .to_owned()
+        .chars()
+        .map(|character| {
+            if character.is_control() || matches!(character, '/' | '\\') {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect()
 }
 
 fn render<W: Write>(reports: &[Report], format: Format, mut out: W) -> Result<()> {
@@ -119,4 +140,39 @@ fn render<W: Write>(reports: &[Report], format: Format, mut out: W) -> Result<()
     }
     writeln!(out)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitizes_control_characters_in_source_names() {
+        assert_eq!(safe_name(Path::new("bad\nname.jsonl")), "bad_name.jsonl");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_input_rejects_symlink_entries() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target.jsonl");
+        std::fs::write(&target, "{}\n").unwrap();
+        symlink(&target, temp.path().join("link.jsonl")).unwrap();
+        let error = explicit_jsonl_paths(temp.path()).unwrap_err();
+        assert!(error.to_string().contains("symbolic link"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicitly_named_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target.jsonl");
+        let link = temp.path().join("link.jsonl");
+        std::fs::write(&target, "{}\n").unwrap();
+        symlink(&target, &link).unwrap();
+        let error = explicit_jsonl_paths(&link).unwrap_err();
+        assert!(error.to_string().contains("symbolic-link inputs"));
+    }
 }

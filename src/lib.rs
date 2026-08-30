@@ -47,7 +47,7 @@ pub struct Report {
     pub embedded_data_urls: u64,
     pub embedded_base64_bytes: u64,
     pub embedded_ratio: f64,
-    pub skipped_large_data_urls: u64,
+    pub uninspected_data_urls: u64,
     pub duplicate_records: u64,
     pub duplicate_content_records: u64,
     pub repeated_instruction_records: u64,
@@ -66,7 +66,7 @@ pub fn scan_reader<R: BufRead>(mut reader: R, source: &str, limits: &Limits) -> 
         embedded_data_urls: 0,
         embedded_base64_bytes: 0,
         embedded_ratio: 0.0,
-        skipped_large_data_urls: 0,
+        uninspected_data_urls: 0,
         duplicate_records: 0,
         duplicate_content_records: 0,
         repeated_instruction_records: 0,
@@ -120,8 +120,12 @@ pub fn scan_reader<R: BufRead>(mut reader: R, source: &str, limits: &Limits) -> 
                 &mut report.duplicate_content_records,
             );
         }
+        let mut record_instruction_hashes = HashSet::new();
         for instruction in explicit_instructions(&value) {
             let hash = hash_bytes(instruction.as_bytes());
+            if !record_instruction_hashes.insert(hash) {
+                continue;
+            }
             track_hash(
                 hash,
                 &mut instruction_hashes,
@@ -155,8 +159,9 @@ fn read_bounded_line<R: BufRead>(
             .iter()
             .position(|b| *b == b'\n')
             .map_or(available.len(), |i| i + 1);
-        if stored.len() < cap + 1 {
-            let retain = take.min(cap + 1 - stored.len());
+        let storage_limit = cap.saturating_add(1);
+        if stored.len() < storage_limit {
+            let retain = take.min(storage_limit - stored.len());
             stored.extend_from_slice(&available[..retain]);
         }
         total = total.saturating_add(take);
@@ -217,12 +222,15 @@ fn inspect_data_urls(value: &Value, report: &mut Report) {
                 return;
             }
             if encoded.len() > MAX_DATA_URL_ENCODED_BYTES {
-                report.skipped_large_data_urls += 1;
+                report.uninspected_data_urls += 1;
                 return;
             }
-            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
-                report.embedded_data_urls += 1;
-                report.embedded_base64_bytes += decoded.len() as u64;
+            match base64::engine::general_purpose::STANDARD.decode(encoded) {
+                Ok(decoded) => {
+                    report.embedded_data_urls += 1;
+                    report.embedded_base64_bytes += decoded.len() as u64;
+                }
+                Err(_) => report.uninspected_data_urls += 1,
             }
         }
         Value::Array(items) => items.iter().for_each(|v| inspect_data_urls(v, report)),
@@ -265,8 +273,8 @@ fn add_findings(report: &mut Report, limits: &Limits) {
         ),
         (
             "RG007_UNINSPECTED_DATA_URL",
-            report.skipped_large_data_urls > 0,
-            report.skipped_large_data_urls,
+            report.uninspected_data_urls > 0,
+            report.uninspected_data_urls,
         ),
         (
             "RG008_HASH_TRACKING_SATURATED",

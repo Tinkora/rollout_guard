@@ -6,7 +6,7 @@ Privacy-first, offline inspection of explicitly selected JSONL rollout artifacts
 
 ## Safety boundary
 
-- Reads only the file or directory you name; a directory scan is non-recursive and includes only immediate `*.jsonl` files.
+- Reads only the file or directory you name; a directory scan is non-recursive and includes only immediate `*.jsonl` files. Explicit symlink inputs and symlink entries inside a selected directory are rejected rather than followed.
 - Streams records and retains at most `--max-line-bytes + 1` bytes per line. Oversized lines are drained without parsing.
 - Never uploads, deletes, rewrites, redacts, or exports input data.
 - Reports basenames, counts, and hashes used only in memory. It never prints record content, secret values, or full local paths.

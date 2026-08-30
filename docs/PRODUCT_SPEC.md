@@ -10,7 +10,7 @@ Agent evaluation and rollout exports can silently become unsafe to move or revie
 
 ## Non-goals
 
-No home-directory discovery, recursive scan, symlink traversal, upload, deletion, mutation, redaction, conversion, replay, semantic prompt classification, arbitrary base64 guessing, or support claim for every agent framework. Both explicitly named symlinks and symlink entries in selected directories are rejected.
+No home-directory discovery, recursive scan, following a final symlink input or an immediate symlink directory entry, upload, deletion, mutation, redaction, conversion, replay, semantic prompt classification, arbitrary base64 guessing, or support claim for every agent framework. Ancestor path components use operating-system path resolution semantics.
 
 ## Resource bounds
 
